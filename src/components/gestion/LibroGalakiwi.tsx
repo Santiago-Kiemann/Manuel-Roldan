@@ -7,10 +7,10 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { Plus, Trash2, User, Calendar, FileDown, ArrowLeft, Percent } from 'lucide-react';
+import { Plus, Trash2, User, Calendar, FileDown, ArrowLeft, Percent, DollarSign, CreditCard } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { exportGalakiwiToPDF } from './exportUtils';
-import type { Libro, Item } from '@/types/gestion';
+import { exportGalakiwiToPDF, exportGalakiwiToExcel } from './exportUtils';
+import type { Libro, Item, Pago } from '@/types/gestion';
 
 interface LibroGalakiwiProps {
   libro: Libro;
@@ -19,6 +19,7 @@ interface LibroGalakiwiProps {
 
 interface SublibroConItems extends Libro {
   items: Item[];
+  totalGenerado: number;
 }
 
 export function LibroGalakiwi({ libro, onLibroUpdated }: LibroGalakiwiProps) {
@@ -26,15 +27,22 @@ export function LibroGalakiwi({ libro, onLibroUpdated }: LibroGalakiwiProps) {
   const [selectedSublibro, setSelectedSublibro] = useState<SublibroConItems | null>(null);
   const [loading, setLoading] = useState(true);
   
+  // Pagos a nivel de libro principal
+  const [pagos, setPagos] = useState<Pago[]>([]);
+  
   // Form states
   const [showNewGuiaDialog, setShowNewGuiaDialog] = useState(false);
   const [newGuiaName, setNewGuiaName] = useState('');
   const [newItem, setNewItem] = useState({ fecha: '', descripcion: '', monto: '', aplica_10: false });
+  
+  // Estados para pagos generales
+  const [showPagoDialog, setShowPagoDialog] = useState(false);
+  const [newPago, setNewPago] = useState({ monto: '', metodo: 'transferencia', nota: '' });
 
-  const fetchSublibros = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      // Obtener sublibros (guías)
+      // Obtener sublibros (guías) con sus items
       const { data: sublibrosData, error: sublibrosError } = await supabase
         .from('libros')
         .select('*')
@@ -43,8 +51,7 @@ export function LibroGalakiwi({ libro, onLibroUpdated }: LibroGalakiwiProps) {
 
       if (sublibrosError) throw sublibrosError;
 
-      // Para cada sublibro, obtener sus items
-      const sublibrosConItems: SublibroConItems[] = [];
+      const sublibrosCompletos: SublibroConItems[] = [];
       
       for (const sub of (sublibrosData || [])) {
         const { data: itemsData, error: itemsError } = await supabase
@@ -55,32 +62,43 @@ export function LibroGalakiwi({ libro, onLibroUpdated }: LibroGalakiwiProps) {
 
         if (itemsError) throw itemsError;
 
-        sublibrosConItems.push({
+        const items = itemsData || [];
+        const totalGenerado = items.reduce((sum, item) => sum + item.monto_final, 0);
+
+        sublibrosCompletos.push({
           ...sub,
-          items: itemsData || [],
+          items,
+          totalGenerado,
         });
       }
 
-      setSublibros(sublibrosConItems);
+      setSublibros(sublibrosCompletos);
+
+      // OBTENER PAGOS DEL LIBRO PRINCIPAL (no de guías)
+      const { data: pagosData, error: pagosError } = await supabase
+        .from('pagos')
+        .select('*')
+        .eq('libro_id', libro.id)
+        .order('fecha_pago', { ascending: true });
+
+      if (pagosError) throw pagosError;
+      setPagos(pagosData || []);
+
     } catch (error) {
-      console.error('Error fetching sublibros:', error);
+      console.error('Error fetching data:', error);
     } finally {
       setLoading(false);
     }
   }, [libro.id]);
 
   useEffect(() => {
-    fetchSublibros();
-  }, [fetchSublibros]);
+    fetchData();
+  }, [fetchData]);
 
-  // Calcular totales
-  const calcularTotalSublibro = (sublibro: SublibroConItems) => {
-    return sublibro.items.reduce((sum, item) => sum + item.monto_final, 0);
-  };
-
-  const calcularTotalGeneral = () => {
-    return sublibros.reduce((sum, sub) => sum + calcularTotalSublibro(sub), 0);
-  };
+  // Calcular totales generales
+  const totalGeneral = sublibros.reduce((sum, sub) => sum + sub.totalGenerado, 0);
+  const totalPagado = pagos.reduce((sum, pago) => sum + pago.monto, 0);
+  const saldoPendiente = totalGeneral - totalPagado;
 
   const handleCreateGuia = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,7 +116,7 @@ export function LibroGalakiwi({ libro, onLibroUpdated }: LibroGalakiwiProps) {
 
       setNewGuiaName('');
       setShowNewGuiaDialog(false);
-      fetchSublibros();
+      fetchData();
       onLibroUpdated();
     } catch (error) {
       console.error('Error creating guia:', error);
@@ -121,10 +139,40 @@ export function LibroGalakiwi({ libro, onLibroUpdated }: LibroGalakiwiProps) {
       if (error) throw error;
 
       setNewItem({ fecha: '', descripcion: '', monto: '', aplica_10: false });
-      fetchSublibros();
+      fetchData();
       onLibroUpdated();
     } catch (error) {
       console.error('Error adding item:', error);
+    }
+  };
+
+  // REGISTRAR PAGO GENERAL (nivel libro, no guía)
+  const handleAddPago = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPago.monto) return;
+
+    const montoPago = parseFloat(newPago.monto);
+    if (montoPago > saldoPendiente) {
+      alert('El pago no puede ser mayor al saldo pendiente');
+      return;
+    }
+
+    try {
+      const { error } = await supabase.from('pagos').insert({
+        libro_id: libro.id,  // ID del libro principal, no de la guía
+        monto: montoPago,
+        metodo: newPago.metodo,
+        nota: newPago.nota || null,
+      });
+
+      if (error) throw error;
+
+      setNewPago({ monto: '', metodo: 'transferencia', nota: '' });
+      setShowPagoDialog(false);
+      fetchData();
+      onLibroUpdated();
+    } catch (error) {
+      console.error('Error adding pago:', error);
     }
   };
 
@@ -134,10 +182,23 @@ export function LibroGalakiwi({ libro, onLibroUpdated }: LibroGalakiwiProps) {
     try {
       const { error } = await supabase.from('items').delete().eq('id', itemId);
       if (error) throw error;
-      fetchSublibros();
+      fetchData();
       onLibroUpdated();
     } catch (error) {
       console.error('Error deleting item:', error);
+    }
+  };
+
+  const handleDeletePago = async (pagoId: string) => {
+    if (!confirm('¿Eliminar este pago?')) return;
+    
+    try {
+      const { error } = await supabase.from('pagos').delete().eq('id', pagoId);
+      if (error) throw error;
+      fetchData();
+      onLibroUpdated();
+    } catch (error) {
+      console.error('Error deleting pago:', error);
     }
   };
 
@@ -152,7 +213,7 @@ export function LibroGalakiwi({ libro, onLibroUpdated }: LibroGalakiwiProps) {
         setSelectedSublibro(null);
       }
       
-      fetchSublibros();
+      fetchData();
       onLibroUpdated();
     } catch (error) {
       console.error('Error deleting guia:', error);
@@ -168,10 +229,8 @@ export function LibroGalakiwi({ libro, onLibroUpdated }: LibroGalakiwiProps) {
     return new Date(dateString).toLocaleDateString('es-EC', { day: '2-digit', month: 'short', year: 'numeric' });
   };
 
-  // Vista de detalle de un sublibro (guía)
+  // VISTA DE DETALLE DE UNA GUÍA (sin pagos, solo servicios)
   if (selectedSublibro) {
-    const totalSublibro = calcularTotalSublibro(selectedSublibro);
-
     return (
       <div className="space-y-4">
         {/* Header */}
@@ -192,25 +251,15 @@ export function LibroGalakiwi({ libro, onLibroUpdated }: LibroGalakiwiProps) {
                   <p className="text-sm text-slate-500">Guía de {libro.nombre}</p>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <div className="text-right">
-                  <p className="text-xs text-slate-500">Total Guía</p>
-                  <p className="text-xl font-bold text-slate-900">{formatCurrency(totalSublibro)}</p>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="text-slate-400 hover:text-red-500"
-                  onClick={() => handleDeleteGuia(selectedSublibro.id)}
-                >
-                  <Trash2 className="h-5 w-5" />
-                </Button>
+              <div className="text-right">
+                <p className="text-xs text-slate-500">Total Guía</p>
+                <p className="text-2xl font-bold text-slate-900">{formatCurrency(selectedSublibro.totalGenerado)}</p>
               </div>
             </div>
           </CardHeader>
         </Card>
 
-        {/* Formulario para agregar item */}
+        {/* Formulario agregar servicio */}
         <Card className="border-slate-200">
           <CardHeader className="pb-3">
             <CardTitle className="text-sm font-medium text-slate-700">Agregar Servicio</CardTitle>
@@ -277,22 +326,24 @@ export function LibroGalakiwi({ libro, onLibroUpdated }: LibroGalakiwiProps) {
           </CardContent>
         </Card>
 
-        {/* Lista de items */}
+        {/* Lista de servicios */}
         <Card className="border-slate-200">
           <CardHeader className="pb-3 flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-medium text-slate-700">Servicios de {selectedSublibro.nombre}</CardTitle>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => exportGalakiwiToPDF(libro, sublibros, selectedSublibro)}>
-                <FileDown className="h-4 w-4 mr-1" />
-                PDF
-              </Button>
-            </div>
+            <Button 
+              variant="ghost" 
+              size="icon"
+              className="text-slate-400 hover:text-red-500"
+              onClick={() => handleDeleteGuia(selectedSublibro.id)}
+            >
+              <Trash2 className="h-5 w-5" />
+            </Button>
           </CardHeader>
           <CardContent>
             <ScrollArea className="h-[350px]">
               {selectedSublibro.items.length === 0 ? (
                 <div className="text-center py-8 text-slate-500">
-                  <p>No hay servicios registrados para esta guía</p>
+                  <p>No hay servicios registrados</p>
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -314,9 +365,7 @@ export function LibroGalakiwi({ libro, onLibroUpdated }: LibroGalakiwiProps) {
                         <div className="text-right">
                           <p className="font-semibold text-slate-900">{formatCurrency(item.monto_final)}</p>
                           {item.aplica_10 && (
-                            <p className="text-xs text-slate-500">
-                              Base: {formatCurrency(item.monto)}
-                            </p>
+                            <p className="text-xs text-slate-500">Base: {formatCurrency(item.monto)}</p>
                           )}
                         </div>
                         <Button
@@ -339,10 +388,10 @@ export function LibroGalakiwi({ libro, onLibroUpdated }: LibroGalakiwiProps) {
     );
   }
 
-  // Vista principal: Grid de guías
+  // VISTA PRINCIPAL: Con pagos generales
   return (
     <div className="space-y-4">
-      {/* Header */}
+      {/* Header con totales y exportación */}
       <Card className="border-slate-200">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
@@ -352,65 +401,172 @@ export function LibroGalakiwi({ libro, onLibroUpdated }: LibroGalakiwiProps) {
                 <p className="text-sm text-slate-500">Factura: {libro.numero_factura}</p>
               )}
             </div>
-            <div className="text-right">
-              <p className="text-xs text-slate-500">Total General</p>
-              <p className="text-2xl font-bold text-slate-900">{formatCurrency(calcularTotalGeneral())}</p>
+            <div className="flex items-center gap-4">
+              <div className="text-right">
+                <p className="text-xs text-slate-500">Total General</p>
+                <p className="text-2xl font-bold text-slate-900">{formatCurrency(totalGeneral)}</p>
+                <div className="flex gap-3 text-xs mt-1 justify-end">
+                  <span className="text-green-600">Pagado: {formatCurrency(totalPagado)}</span>
+                  <span className="text-amber-600">Pendiente: {formatCurrency(saldoPendiente)}</span>
+                </div>
+              </div>
+              {/* Botones exportar */}
+              <div className="flex flex-col gap-2">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => exportGalakiwiToPDF(libro, sublibros, pagos)}
+                  className="bg-slate-800 text-white hover:bg-slate-700"
+                >
+                  <FileDown className="h-4 w-4 mr-1" />
+                  PDF
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => exportGalakiwiToExcel(libro, sublibros, pagos)}
+                >
+                  <FileDown className="h-4 w-4 mr-1" />
+                  Excel
+                </Button>
+              </div>
             </div>
           </div>
         </CardHeader>
+        <CardContent>
+          {/* Resumen de totales */}
+          <div className="grid grid-cols-3 gap-4">
+            <div className="bg-slate-50 p-3 rounded-lg text-center">
+              <p className="text-xs text-slate-500 mb-1">Total Generado</p>
+              <p className="text-lg font-semibold text-slate-900">{formatCurrency(totalGeneral)}</p>
+            </div>
+            <div className="bg-green-50 p-3 rounded-lg text-center">
+              <p className="text-xs text-green-600 mb-1">Total Pagado</p>
+              <p className="text-lg font-semibold text-green-700">{formatCurrency(totalPagado)}</p>
+            </div>
+            <div className={`p-3 rounded-lg text-center ${saldoPendiente > 0 ? 'bg-amber-50' : 'bg-green-50'}`}>
+              <p className="text-xs text-slate-500 mb-1">Saldo Pendiente</p>
+              <p className={`text-lg font-semibold ${saldoPendiente > 0 ? 'text-amber-600' : 'text-green-600'}`}>
+                {formatCurrency(saldoPendiente)}
+              </p>
+            </div>
+          </div>
+        </CardContent>
       </Card>
 
-      {/* Grid de guías */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {/* Botón de nueva guía */}
-        <button
-          onClick={() => setShowNewGuiaDialog(true)}
-          className="flex flex-col items-center justify-center p-6 bg-slate-50 border-2 border-dashed border-slate-300 rounded-lg hover:bg-slate-100 hover:border-slate-400 transition-colors min-h-[140px]"
-        >
-          <Plus className="h-8 w-8 text-slate-400 mb-2" />
-          <span className="text-sm font-medium text-slate-600">Nueva Guía</span>
-        </button>
-
-        {/* Tarjetas de guías */}
-        {sublibros.map((sublibro) => {
-          const total = calcularTotalSublibro(sublibro);
-          const cantidadItems = sublibro.items.length;
-
-          return (
-            <div
-              key={sublibro.id}
-              onClick={() => setSelectedSublibro(sublibro)}
-              className="p-5 bg-white border border-slate-200 rounded-lg hover:shadow-md hover:border-slate-300 transition-all cursor-pointer"
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Columna izquierda: Guías */}
+        <div className="lg:col-span-2 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-semibold text-slate-900">Guías</h3>
+            <Button 
+              size="sm" 
+              onClick={() => setShowNewGuiaDialog(true)}
+              className="bg-slate-800 hover:bg-slate-700"
             >
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="bg-slate-100 p-2 rounded-full">
-                    <User className="h-5 w-5 text-slate-600" />
+              <Plus className="h-4 w-4 mr-1" />
+              Nueva Guía
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {sublibros.map((sublibro) => {
+              const cantidadItems = sublibro.items.length;
+
+              return (
+                <div
+                  key={sublibro.id}
+                  onClick={() => setSelectedSublibro(sublibro)}
+                  className="p-4 bg-white border border-slate-200 rounded-lg hover:shadow-md hover:border-slate-300 transition-all cursor-pointer"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="bg-slate-100 p-2 rounded-full">
+                      <User className="h-5 w-5 text-slate-600" />
+                    </div>
+                    <div className="flex-1">
+                      <h4 className="font-semibold text-slate-900">{sublibro.nombre}</h4>
+                      <p className="text-xs text-slate-500">{cantidadItems} servicio{cantidadItems !== 1 ? 's' : ''}</p>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="font-semibold text-slate-900">{sublibro.nombre}</h3>
-                    <p className="text-xs text-slate-500">{cantidadItems} servicio{cantidadItems !== 1 ? 's' : ''}</p>
+                  <div className="mt-3 pt-3 border-t border-slate-100">
+                    <p className="text-xs text-slate-500 mb-1">Total acumulado</p>
+                    <p className="text-xl font-bold text-slate-900">{formatCurrency(sublibro.totalGenerado)}</p>
                   </div>
                 </div>
+              );
+            })}
+
+            {sublibros.length === 0 && !loading && (
+              <div className="col-span-2 text-center py-8 bg-slate-50 rounded-lg border border-dashed border-slate-300">
+                <User className="h-10 w-10 text-slate-300 mx-auto mb-2" />
+                <p className="text-slate-500 text-sm">No hay guías registradas</p>
               </div>
-              <div className="mt-4 pt-3 border-t border-slate-100">
-                <p className="text-xs text-slate-500 mb-1">Total acumulado</p>
-                <p className="text-xl font-bold text-slate-900">{formatCurrency(total)}</p>
-              </div>
-            </div>
-          );
-        })}
+            )}
+          </div>
+        </div>
+
+        {/* Columna derecha: Pagos Generales */}
+        <div className="space-y-4">
+          <Card className="border-slate-200">
+            <CardHeader className="pb-3 flex flex-row items-center justify-between">
+              <CardTitle className="text-sm font-medium text-slate-700">Pagos del Libro</CardTitle>
+              {saldoPendiente > 0 && (
+                <Button 
+                  size="sm" 
+                  onClick={() => setShowPagoDialog(true)}
+                  className="bg-green-600 hover:bg-green-700"
+                >
+                  <DollarSign className="h-4 w-4 mr-1" />
+                  Registrar
+                </Button>
+              )}
+            </CardHeader>
+            <CardContent>
+              <ScrollArea className="h-[300px]">
+                {pagos.length === 0 ? (
+                  <div className="text-center py-8 text-slate-500">
+                    <CreditCard className="h-10 w-10 mx-auto mb-2 text-slate-300" />
+                    <p className="text-sm">No hay pagos registrados</p>
+                    <p className="text-xs text-slate-400 mt-1">Los pagos se registran aquí, no por guía</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {pagos.map((pago) => (
+                      <div key={pago.id} className="p-3 bg-green-50 rounded-lg">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <CreditCard className="h-4 w-4 text-green-600" />
+                            <span className="text-sm text-slate-600">{formatDate(pago.fecha_pago)}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-green-700">{formatCurrency(pago.monto)}</span>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-slate-400 hover:text-red-500"
+                              onClick={() => handleDeletePago(pago.id)}
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 mt-1">
+                          <Badge variant="outline" className="text-xs capitalize">
+                            {pago.metodo}
+                          </Badge>
+                          {pago.nota && <span className="text-xs text-slate-500 truncate">{pago.nota}</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </ScrollArea>
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
-      {sublibros.length === 0 && !loading && (
-        <div className="text-center py-12 bg-slate-50 rounded-lg border border-dashed border-slate-300">
-          <User className="h-12 w-12 text-slate-300 mx-auto mb-3" />
-          <p className="text-slate-500">No hay guías registradas</p>
-          <p className="text-sm text-slate-400 mt-1">Haz clic en "Nueva Guía" para comenzar</p>
-        </div>
-      )}
-
-      {/* Dialog para nueva guía */}
+      {/* Dialog nueva guía */}
       <Dialog open={showNewGuiaDialog} onOpenChange={setShowNewGuiaDialog}>
         <DialogContent>
           <DialogHeader>
@@ -426,7 +582,7 @@ export function LibroGalakiwi({ libro, onLibroUpdated }: LibroGalakiwiProps) {
                 id="guiaName"
                 value={newGuiaName}
                 onChange={(e) => setNewGuiaName(e.target.value)}
-                placeholder="Ej: Tim, Pepo, etc."
+                placeholder="Ej: Pedro, Prisila, etc."
                 required
               />
             </div>
@@ -436,6 +592,80 @@ export function LibroGalakiwi({ libro, onLibroUpdated }: LibroGalakiwiProps) {
               </Button>
               <Button type="submit" className="bg-slate-800 hover:bg-slate-700">
                 Crear Guía
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog registrar pago general */}
+      <Dialog open={showPagoDialog} onOpenChange={setShowPagoDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Registrar Pago - {libro.nombre}</DialogTitle>
+            <DialogDescription>
+              Registra un pago general para todo el libro.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleAddPago} className="space-y-4 mt-4">
+            <div className="bg-slate-50 p-4 rounded-lg">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-sm text-slate-600">Total General:</span>
+                <span className="font-semibold">{formatCurrency(totalGeneral)}</span>
+              </div>
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-sm text-slate-600">Ya pagado:</span>
+                <span className="font-semibold text-green-600">{formatCurrency(totalPagado)}</span>
+              </div>
+              <div className="border-t pt-2 flex justify-between items-center">
+                <span className="text-sm font-medium text-slate-700">Saldo pendiente:</span>
+                <span className="font-bold text-amber-600 text-lg">{formatCurrency(saldoPendiente)}</span>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Monto a pagar *</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0.01"
+                max={saldoPendiente}
+                placeholder={`Máximo: ${formatCurrency(saldoPendiente)}`}
+                value={newPago.monto}
+                onChange={(e) => setNewPago({ ...newPago, monto: e.target.value })}
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Método de pago</Label>
+              <select
+                value={newPago.metodo}
+                onChange={(e) => setNewPago({ ...newPago, metodo: e.target.value })}
+                className="w-full h-10 px-3 rounded-md border border-slate-300 bg-white text-sm"
+              >
+                <option value="transferencia">Transferencia</option>
+                <option value="efectivo">Efectivo</option>
+                <option value="deposito">Depósito</option>
+                <option value="cheque">Cheque</option>
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Nota (opcional)</Label>
+              <Input
+                placeholder="Ej: Pago parcial, anticipo, etc."
+                value={newPago.nota}
+                onChange={(e) => setNewPago({ ...newPago, nota: e.target.value })}
+              />
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <Button type="button" variant="outline" onClick={() => setShowPagoDialog(false)}>
+                Cancelar
+              </Button>
+              <Button type="submit" className="bg-green-600 hover:bg-green-700">
+                Registrar Pago
               </Button>
             </div>
           </form>

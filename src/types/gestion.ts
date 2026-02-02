@@ -63,3 +63,15 @@ export interface NuevoPagoData {
   metodo?: string;
   nota?: string;
 }
+
+// En tu archivo types/gestion.ts
+export interface PagoGalakiwi {
+  id: string;
+  libro_id: string;        // ID del libro principal (Galakiwi)
+  guia_id: string;         // ID del sublibro/guía
+  monto: number;
+  fecha_pago: string;
+  metodo: 'efectivo' | 'transferencia' | 'deposito';
+  nota?: string;
+  created_at?: string;
+}

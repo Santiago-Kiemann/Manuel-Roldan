@@ -3,7 +3,7 @@ import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import type { Libro, Item, Pago } from '@/types/gestion';
 
-// ==================== DEEP BLUE EXPORTS ====================
+// ==================== DEEP BLUE EXPORTS (sin cambios) ====================
 
 export function exportToPDF(libro: Libro, items: Item[], pagos: Pago[]) {
   const doc = new jsPDF();
@@ -141,13 +141,18 @@ export function exportToExcel(libro: Libro, items: Item[], pagos: Pago[]) {
   XLSX.writeFile(wb, `DeepBlue_${libro.nombre.replace(/\s+/g, '_')}.xlsx`);
 }
 
-// ==================== GALAKIWI EXPORTS ====================
-
+// ==================== GALAKIWI EXPORTS (ACTUALIZADO) ====================
 interface SublibroConItems extends Libro {
   items: Item[];
+  totalGenerado: number;
 }
 
-export function exportGalakiwiToPDF(libro: Libro, sublibros: SublibroConItems[], guiaEspecifica?: SublibroConItems) {
+export function exportGalakiwiToPDF(
+  libro: Libro, 
+  sublibros: SublibroConItems[], 
+  pagos: Pago[],
+  guiaEspecifica?: SublibroConItems
+) {
   const doc = new jsPDF();
   
   // Header
@@ -161,14 +166,19 @@ export function exportGalakiwiToPDF(libro: Libro, sublibros: SublibroConItems[],
     doc.text(`Factura: ${libro.numero_factura}`, 14, 44);
   }
   
+  // Calcular totales generales
+  const totalGeneral = sublibros.reduce((sum, sub) => sum + sub.totalGenerado, 0);
+  const totalPagado = pagos.reduce((sum, pago) => sum + pago.monto, 0);
+  const saldoGeneral = totalGeneral - totalPagado;
+  
   // Si es exportación de una guía específica
   if (guiaEspecifica) {
     doc.text(`Guía: ${guiaEspecifica.nombre}`, 14, libro.numero_factura ? 51 : 44);
     
-    const totalGuia = guiaEspecifica.items.reduce((sum, item) => sum + item.monto_final, 0);
     doc.setFontSize(11);
-    doc.text(`Total Guía: $${totalGuia.toFixed(2)}`, 140, 30);
+    doc.text(`Total Guía: $${guiaEspecifica.totalGenerado.toFixed(2)}`, 140, 30);
     
+    // Tabla de Items
     if (guiaEspecifica.items.length > 0) {
       doc.setFontSize(14);
       doc.text('Servicios', 14, 65);
@@ -188,49 +198,60 @@ export function exportGalakiwiToPDF(libro: Libro, sublibros: SublibroConItems[],
       });
     }
   } else {
-    // Exportación completa de todas las guías
-    const totalGeneral = sublibros.reduce((sum, sub) => 
-      sum + sub.items.reduce((s, item) => s + item.monto_final, 0), 0
-    );
-    
+    // Exportación COMPLETA con pagos generales
     doc.setFontSize(11);
-    doc.text(`Total General: $${totalGeneral.toFixed(2)}`, 140, 30);
-    doc.text(`Guías: ${sublibros.length}`, 140, 37);
+    doc.text(`Total General: $${totalGeneral.toFixed(2)}`, 14, libro.numero_factura ? 55 : 48);
+    doc.text(`Total Pagado: $${totalPagado.toFixed(2)}`, 14, libro.numero_factura ? 62 : 55);
+    doc.setTextColor(saldoGeneral > 0 ? 200 : 0, saldoGeneral > 0 ? 0 : 150, 0);
+    doc.text(`Saldo Pendiente: $${saldoGeneral.toFixed(2)}`, 14, libro.numero_factura ? 69 : 62);
+    doc.setTextColor(0, 0, 0);
+    doc.text(`Guías: ${sublibros.length}`, 14, libro.numero_factura ? 76 : 69);
     
-    let startY = 55;
+    let startY = libro.numero_factura ? 85 : 78;
     
-    sublibros.forEach((sublibro) => {
-      const totalGuia = sublibro.items.reduce((sum, item) => sum + item.monto_final, 0);
+    // Tabla de Guías
+    if (sublibros.length > 0) {
+      doc.setFontSize(14);
+      doc.text('Resumen por Guía', 14, startY);
       
+      autoTable(doc, {
+        startY: startY + 5,
+        head: [['Guía', 'Servicios', 'Total Generado']],
+        body: sublibros.map(sub => [
+          sub.nombre,
+          sub.items.length.toString(),
+          `$${sub.totalGenerado.toFixed(2)}`,
+        ]),
+        theme: 'striped',
+        headStyles: { fillColor: [102, 51, 153] },
+      });
+      
+      startY = (doc as any).lastAutoTable.finalY + 15;
+    }
+    
+    // Tabla de Pagos Generales
+    if (pagos.length > 0) {
       if (startY > 200) {
         doc.addPage();
         startY = 20;
       }
       
-      doc.setFontSize(13);
-      doc.text(`${sublibro.nombre} - Total: $${totalGuia.toFixed(2)}`, 14, startY);
+      doc.setFontSize(14);
+      doc.text('Pagos Registrados', 14, startY);
       
-      if (sublibro.items.length > 0) {
-        autoTable(doc, {
-          startY: startY + 5,
-          head: [['Fecha', 'Descripción', 'Monto Base', '+10%', 'Monto Final']],
-          body: sublibro.items.map(item => [
-            item.fecha ? new Date(item.fecha).toLocaleDateString('es-EC') : '-',
-            item.descripcion,
-            `$${item.monto.toFixed(2)}`,
-            item.aplica_10 ? 'Sí' : 'No',
-            `$${item.monto_final.toFixed(2)}`,
-          ]),
-          theme: 'striped',
-          headStyles: { fillColor: [102, 51, 153] },
-          styles: { fontSize: 9 },
-        });
-        
-        startY = (doc as any).lastAutoTable.finalY + 15;
-      } else {
-        startY += 15;
-      }
-    });
+      autoTable(doc, {
+        startY: startY + 5,
+        head: [['Fecha', 'Método', 'Nota', 'Monto']],
+        body: pagos.map(pago => [
+          new Date(pago.fecha_pago).toLocaleDateString('es-EC'),
+          pago.metodo,
+          pago.nota || '-',
+          `$${pago.monto.toFixed(2)}`,
+        ]),
+        theme: 'striped',
+        headStyles: { fillColor: [0, 128, 0] },
+      });
+    }
   }
   
   // Footer
@@ -251,56 +272,77 @@ export function exportGalakiwiToPDF(libro: Libro, sublibros: SublibroConItems[],
   doc.save(fileName.replace(/\s+/g, '_'));
 }
 
-export function exportGalakiwiToExcel(libro: Libro, sublibros: SublibroConItems[]) {
+export function exportGalakiwiToExcel(
+  libro: Libro, 
+  sublibros: SublibroConItems[], 
+  pagos: Pago[]
+) {
   const wb = XLSX.utils.book_new();
   
-  // Hoja por cada guía
+  const totalGeneral = sublibros.reduce((sum, sub) => sum + sub.totalGenerado, 0);
+  const totalPagado = pagos.reduce((sum, pago) => sum + pago.monto, 0);
+  
+  // Hoja de Guías (servicios detallados)
   sublibros.forEach(sublibro => {
-    const totalGuia = sublibro.items.reduce((sum, item) => sum + item.monto_final, 0);
+    const sheetData: any[] = [
+      [`GUÍA: ${sublibro.nombre}`],
+      [],
+      ['Servicios'],
+      ['Fecha', 'Descripción', 'Monto Base', 'Aplica 10%', 'Monto Final'],
+      ...sublibro.items.map(item => [
+        item.fecha ? new Date(item.fecha).toLocaleDateString('es-EC') : '-',
+        item.descripcion,
+        item.monto,
+        item.aplica_10 ? 'Sí' : 'No',
+        item.monto_final,
+      ]),
+      [],
+      ['', '', '', 'TOTAL GUÍA:', sublibro.totalGenerado],
+    ];
     
-    const itemsData = sublibro.items.map(item => ({
-      Fecha: item.fecha ? new Date(item.fecha).toLocaleDateString('es-EC') : '-',
-      Descripción: item.descripcion,
-      'Monto Base': item.monto,
-      'Aplica 10%': item.aplica_10 ? 'Sí' : 'No',
-      'Monto Final': item.monto_final,
-    }));
-    
-    itemsData.push({
-      Fecha: '',
-      Descripción: 'TOTAL',
-      'Monto Base': '',
-      'Aplica 10%': '',
-      'Monto Final': totalGuia,
-    } as any);
-    
-    const sheet = XLSX.utils.json_to_sheet(itemsData);
+    const sheet = XLSX.utils.aoa_to_sheet(sheetData);
     XLSX.utils.book_append_sheet(wb, sheet, sublibro.nombre.substring(0, 31));
   });
   
-  // Hoja de Resumen General
-  const totalGeneral = sublibros.reduce((sum, sub) => 
-    sum + sub.items.reduce((s, item) => s + item.monto_final, 0), 0
-  );
+  // Hoja de Pagos Generales
+  if (pagos.length > 0) {
+    const pagosData = [
+      ['PAGOS GENERALES DEL LIBRO'],
+      [],
+      ['Fecha', 'Método', 'Nota', 'Monto'],
+      ...pagos.map(pago => [
+        new Date(pago.fecha_pago).toLocaleDateString('es-EC'),
+        pago.metodo,
+        pago.nota || '',
+        pago.monto,
+      ]),
+      [],
+      ['', '', 'TOTAL PAGADO:', totalPagado],
+    ];
+    
+    const pagosSheet = XLSX.utils.aoa_to_sheet(pagosData);
+    XLSX.utils.book_append_sheet(wb, pagosSheet, 'Pagos');
+  }
   
+  // Hoja de Resumen General
   const resumenData = [
-    ['RESUMEN GENERAL'],
+    ['RESUMEN GENERAL - GALAKIWI'],
     [],
     ['Cliente:', 'Galakiwi'],
     ['Libro:', libro.nombre],
     ['Factura:', libro.numero_factura || 'N/A'],
+    ['Fecha:', new Date().toLocaleDateString('es-EC')],
     [],
-    ['Guía', 'Total'],
-    ...sublibros.map(sub => [
-      sub.nombre,
-      sub.items.reduce((sum, item) => sum + item.monto_final, 0),
-    ]),
+    ['Guía', 'Total Generado'],
+    ...sublibros.map(sub => [sub.nombre, sub.totalGenerado]),
     [],
-    ['TOTAL GENERAL', totalGeneral],
+    ['TOTAL GENERADO', totalGeneral],
+    ['TOTAL PAGADO', totalPagado],
+    ['SALDO PENDIENTE', totalGeneral - totalPagado],
   ];
   
   const resumenSheet = XLSX.utils.aoa_to_sheet(resumenData);
-  XLSX.utils.book_append_sheet(wb, resumenSheet, 'Resumen');
+  XLSX.utils.book_append_sheet(wb, resumenSheet, 'Resumen General');
   
   XLSX.writeFile(wb, `Galakiwi_${libro.nombre.replace(/\s+/g, '_')}.xlsx`);
 }
