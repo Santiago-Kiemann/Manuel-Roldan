@@ -4,345 +4,1136 @@ import * as XLSX from 'xlsx';
 import type { Libro, Item, Pago } from '@/types/gestion';
 
 // ==================== DEEP BLUE EXPORTS (sin cambios) ====================
+// ==================== DEEP BLUE HTML EXPORT ====================
 
-export function exportToPDF(libro: Libro, items: Item[], pagos: Pago[]) {
-  const doc = new jsPDF();
-  
-  // Header
-  doc.setFontSize(18);
-  doc.text('Tío Ñaño - Libro de Servicios', 14, 20);
-  
-  doc.setFontSize(12);
-  doc.text(`Cliente: Deep Blue`, 14, 30);
-  doc.text(`Libro: ${libro.nombre}`, 14, 37);
-  if (libro.numero_factura) {
-    doc.text(`Factura: ${libro.numero_factura}`, 14, 44);
-  }
-  doc.text(`Estado: ${libro.estado.toUpperCase()}`, 14, libro.numero_factura ? 51 : 44);
-  
-  // Totales
+export function exportDeepBlueToHTML(libro: Libro, items: Item[], pagos: Pago[]) {
   const totalItems = items.reduce((sum, item) => sum + item.monto, 0);
-  const totalPagos = pagos.reduce((sum, pago) => sum + pago.monto, 0);
-  const saldo = totalItems - totalPagos;
+  const totalPagado = pagos.reduce((sum, pago) => sum + pago.monto, 0);
+  const saldoPendiente = totalItems - totalPagado;
   
-  doc.setFontSize(11);
-  doc.text(`Total Servicios: $${totalItems.toFixed(2)}`, 140, 30);
-  doc.text(`Total Pagado: $${totalPagos.toFixed(2)}`, 140, 37);
-  doc.setTextColor(saldo > 0 ? 200 : 0, saldo > 0 ? 0 : 150, 0);
-  doc.text(`Saldo Pendiente: $${saldo.toFixed(2)}`, 140, 44);
-  doc.setTextColor(0, 0, 0);
-  
-  // Tabla de Items
-  if (items.length > 0) {
-    doc.setFontSize(14);
-    doc.text('Servicios', 14, 70);
-    
-    autoTable(doc, {
-      startY: 75,
-      head: [['Fecha', 'Descripción', 'Monto']],
-      body: items.map(item => [
-        item.fecha ? new Date(item.fecha).toLocaleDateString('es-EC') : '-',
-        item.descripcion,
-        `$${item.monto.toFixed(2)}`,
-      ]),
-      theme: 'striped',
-      headStyles: { fillColor: [51, 51, 51] },
+  const fechaExportacion = new Date().toLocaleString('es-EC', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('es-EC', { 
+      style: 'currency', 
+      currency: 'USD' 
+    }).format(amount);
+  };
+
+  const formatDate = (dateString: string | null) => {
+    if (!dateString) return '-';
+    return new Date(dateString).toLocaleDateString('es-EC', { 
+      day: '2-digit', 
+      month: '2-digit', 
+      year: 'numeric' 
     });
-  }
-  
-  // Tabla de Pagos
-  if (pagos.length > 0) {
-    const finalY = (doc as any).lastAutoTable?.finalY || 80;
-    doc.setFontSize(14);
-    doc.text('Pagos', 14, finalY + 15);
+  };
+
+  const getEstadoBadge = (estado: string) => {
+    const styles: Record<string, string> = {
+      'abierto': '<span class="badge badge-warning">Abierto</span>',
+      'cerrado': '<span class="badge badge-info">Cerrado</span>',
+      'pagado': '<span class="badge badge-success">Pagado</span>'
+    };
+    return styles[estado] || estado;
+  };
+
+  const htmlContent = `
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Deep Blue - ${libro.nombre}</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
     
-    autoTable(doc, {
-      startY: finalY + 20,
-      head: [['Fecha', 'Método', 'Nota', 'Monto']],
-      body: pagos.map(pago => [
-        new Date(pago.fecha_pago).toLocaleDateString('es-EC'),
-        pago.metodo,
-        pago.nota || '-',
-        `$${pago.monto.toFixed(2)}`,
-      ]),
-      theme: 'striped',
-      headStyles: { fillColor: [0, 128, 0] },
-    });
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #f5f5f5;
+      padding: 20px;
+      line-height: 1.6;
+    }
+    
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      background: white;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    
+    /* Header - Azul oscuro para Deep Blue */
+    .header {
+      background: linear-gradient(135deg, #1e3a5f 0%, #2c5282 100%);
+      color: white;
+      padding: 30px;
+      text-align: center;
+    }
+    
+    .header h1 {
+      font-size: 2.5rem;
+      font-weight: 700;
+      margin-bottom: 5px;
+      letter-spacing: 1px;
+    }
+    
+    .header p {
+      font-size: 1.1rem;
+      opacity: 0.9;
+    }
+    
+    /* Info Section */
+    .info-section {
+      background: #f8fafc;
+      padding: 20px 30px;
+      border-bottom: 3px solid #1e3a5f;
+    }
+    
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+    }
+    
+    .info-item {
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .info-label {
+      font-size: 0.85rem;
+      color: #64748b;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    
+    .info-value {
+      font-size: 1.1rem;
+      color: #1e293b;
+      font-weight: 600;
+      margin-top: 3px;
+    }
+    
+    /* Estado Badge Grande */
+    .estado-principal {
+      display: inline-block;
+      padding: 8px 20px;
+      border-radius: 20px;
+      font-size: 0.9rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    
+    .estado-abierto {
+      background: #fef3c7;
+      color: #d97706;
+    }
+    
+    .estado-pagado {
+      background: #dcfce7;
+      color: #16a34a;
+    }
+    
+    .estado-cerrado {
+      background: #e0e7ff;
+      color: #4f46e5;
+    }
+    
+    /* Resumen General */
+    .resumen-section {
+      padding: 25px 30px;
+      background: white;
+    }
+    
+    .section-title {
+      font-size: 1.1rem;
+      color: #1e3a5f;
+      font-weight: 700;
+      margin-bottom: 15px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    
+    .resumen-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 15px;
+    }
+    
+    .resumen-card {
+      background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+      border-radius: 10px;
+      padding: 20px;
+      text-align: center;
+      border: 2px solid #e2e8f0;
+      transition: transform 0.2s;
+    }
+    
+    .resumen-card:hover {
+      transform: translateY(-2px);
+    }
+    
+    .resumen-card.servicios {
+      background: linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%);
+      border-color: #1e3a5f;
+    }
+    
+    .resumen-card.pagado {
+      background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
+      border-color: #22c55e;
+    }
+    
+    .resumen-card.pendiente {
+      background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+      border-color: #f59e0b;
+    }
+    
+    .resumen-label {
+      font-size: 0.8rem;
+      color: #64748b;
+      font-weight: 600;
+      text-transform: uppercase;
+      margin-bottom: 5px;
+    }
+    
+    .resumen-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #1e293b;
+    }
+    
+    .resumen-card.servicios .resumen-value {
+      color: #1e3a5f;
+    }
+    
+    .resumen-card.pagado .resumen-value {
+      color: #16a34a;
+    }
+    
+    .resumen-card.pendiente .resumen-value {
+      color: #d97706;
+    }
+    
+    /* Progress Bar */
+    .progress-section {
+      padding: 0 30px 25px;
+    }
+    
+    .progress-container {
+      background: #e2e8f0;
+      border-radius: 10px;
+      height: 30px;
+      overflow: hidden;
+      position: relative;
+    }
+    
+    .progress-bar {
+      background: linear-gradient(90deg, #22c55e 0%, #16a34a 100%);
+      height: 100%;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      padding-right: 10px;
+      color: white;
+      font-weight: 600;
+      font-size: 0.9rem;
+      transition: width 0.5s ease;
+    }
+    
+    .progress-text {
+      position: absolute;
+      width: 100%;
+      text-align: center;
+      line-height: 30px;
+      font-weight: 600;
+      color: #1e293b;
+      mix-blend-mode: multiply;
+    }
+    
+    /* Tables */
+    .table-section {
+      padding: 25px 30px;
+      border-top: 1px solid #e2e8f0;
+    }
+    
+    .table-container {
+      overflow-x: auto;
+      border-radius: 8px;
+      border: 1px solid #e2e8f0;
+    }
+    
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+    }
+    
+    thead {
+      background: linear-gradient(135deg, #1e3a5f 0%, #2c5282 100%);
+      color: white;
+    }
+    
+    th {
+      padding: 12px 15px;
+      text-align: left;
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 0.8rem;
+      letter-spacing: 0.5px;
+    }
+    
+    td {
+      padding: 12px 15px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    
+    tbody tr:hover {
+      background: #f8fafc;
+    }
+    
+    tbody tr:last-child td {
+      border-bottom: none;
+    }
+    
+    .text-right {
+      text-align: right;
+    }
+    
+    .text-center {
+      text-align: center;
+    }
+    
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    
+    .badge-success {
+      background: #dcfce7;
+      color: #16a34a;
+    }
+    
+    .badge-warning {
+      background: #fef3c7;
+      color: #d97706;
+    }
+    
+    .badge-info {
+      background: #e0e7ff;
+      color: #4f46e5;
+    }
+    
+    /* Footer */
+    .footer {
+      background: #1e293b;
+      color: white;
+      padding: 20px 30px;
+      text-align: center;
+      font-size: 0.9rem;
+    }
+    
+    /* Print styles */
+    @media print {
+      body {
+        background: white;
+        padding: 0;
+      }
+      
+      .container {
+        box-shadow: none;
+        max-width: 100%;
+      }
+      
+      .no-print {
+        display: none;
+      }
+    }
+    
+    /* Action buttons */
+    .actions {
+      padding: 20px 30px;
+      background: #f8fafc;
+      border-top: 1px solid #e2e8f0;
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+    }
+    
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s;
+    }
+    
+    .btn-primary {
+      background: #1e3a5f;
+      color: white;
+    }
+    
+    .btn-primary:hover {
+      background: #2c5282;
+    }
+    
+    .btn-secondary {
+      background: white;
+      color: #1e3a5f;
+      border: 2px solid #1e3a5f;
+    }
+    
+    .btn-secondary:hover {
+      background: #f8fafc;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <h1>Deep Blue</h1>
+      <p>Gestión de Saldos y Pagos Parciales</p>
+    </div>
+    
+    <!-- Info -->
+    <div class="info-section">
+      <div class="info-grid">
+        <div class="info-item">
+          <span class="info-label">Libro</span>
+          <span class="info-value">${libro.nombre}</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">Número de Factura</span>
+          <span class="info-value">${libro.numero_factura || 'N/A'}</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">Estado</span>
+          <span class="info-value">${getEstadoBadge(libro.estado)}</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">Fecha de Exportación</span>
+          <span class="info-value">${fechaExportacion}</span>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Resumen General -->
+    <div class="resumen-section">
+      <h2 class="section-title">📊 Resumen General</h2>
+      <div class="resumen-cards">
+        <div class="resumen-card servicios">
+          <div class="resumen-label">Total Servicios</div>
+          <div class="resumen-value">${formatCurrency(totalItems)}</div>
+        </div>
+        <div class="resumen-card pagado">
+          <div class="resumen-label">Total Pagado</div>
+          <div class="resumen-value">${formatCurrency(totalPagado)}</div>
+        </div>
+        <div class="resumen-card pendiente">
+          <div class="resumen-label">Saldo Pendiente</div>
+          <div class="resumen-value">${formatCurrency(saldoPendiente)}</div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Barra de Progreso -->
+    <div class="progress-section">
+      <div class="progress-container">
+        <div class="progress-bar" style="width: ${totalItems > 0 ? (totalPagado / totalItems * 100) : 0}%">
+          ${totalItems > 0 ? Math.round(totalPagado / totalItems * 100) : 0}%
+        </div>
+        <div class="progress-text">
+          ${totalItems > 0 ? Math.round(totalPagado / totalItems * 100) : 0}% Pagado
+        </div>
+      </div>
+    </div>
+    
+    <!-- Servicios -->
+    <div class="table-section">
+      <h2 class="section-title">📝 Servicios Realizados</h2>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Descripción</th>
+              <th class="text-right">Monto</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${items.length > 0 ? items.map(item => `
+              <tr>
+                <td>${formatDate(item.fecha)}</td>
+                <td>${item.descripcion}</td>
+                <td class="text-right">${formatCurrency(item.monto)}</td>
+              </tr>
+            `).join('') : `
+              <tr>
+                <td colspan="3" class="text-center" style="padding: 30px; color: #64748b;">
+                  No hay servicios registrados
+                </td>
+              </tr>
+            `}
+            <tr style="background: #f1f5f9; font-weight: 700;">
+              <td colspan="2" style="text-align: right;">TOTAL SERVICIOS:</td>
+              <td class="text-right" style="color: #1e3a5f; font-size: 1.1rem;">
+                ${formatCurrency(totalItems)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    
+    <!-- Pagos -->
+    ${pagos.length > 0 ? `
+    <div class="table-section">
+      <h2 class="section-title">💳 Pagos Recibidos</h2>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Método</th>
+              <th>Nota</th>
+              <th class="text-right">Monto</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${pagos.map(pago => `
+              <tr>
+                <td>${formatDate(pago.fecha_pago)}</td>
+                <td>
+                  <span class="badge ${pago.metodo === 'efectivo' ? 'badge-warning' : pago.metodo === 'transferencia' ? 'badge-success' : 'badge-info'}">
+                    ${pago.metodo}
+                  </span>
+                </td>
+                <td>${pago.nota || '-'}</td>
+                <td class="text-right" style="color: #16a34a; font-weight: 600;">
+                  ${formatCurrency(pago.monto)}
+                </td>
+              </tr>
+            `).join('')}
+            <tr style="background: #f0fdf4; font-weight: 700;">
+              <td colspan="3" style="text-align: right;">TOTAL PAGADO:</td>
+              <td class="text-right" style="color: #16a34a; font-size: 1.1rem;">
+                ${formatCurrency(totalPagado)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    ` : `
+    <div class="table-section">
+      <h2 class="section-title">💳 Pagos Recibidos</h2>
+      <div style="text-align: center; padding: 40px; background: #f8fafc; border-radius: 8px; color: #64748b;">
+        <p style="font-size: 1.1rem;">No hay pagos registrados aún</p>
+        <p style="font-size: 0.9rem; margin-top: 5px;">Saldo pendiente: ${formatCurrency(saldoPendiente)}</p>
+      </div>
+    </div>
+    `}
+    
+    <!-- Footer -->
+    <div class="footer">
+      <p>Generado por Tío Ñaño - Sistema de Gestión de Libros</p>
+      <p style="margin-top: 5px; opacity: 0.8; font-size: 0.8rem;">
+        ${new Date().getFullYear()} - Todos los derechos reservados
+      </p>
+    </div>
+    
+    <!-- Actions -->
+    <div class="actions no-print">
+      <button class="btn btn-primary" onclick="window.print()">
+        🖨️ Imprimir / Guardar PDF
+      </button>
+      <button class="btn btn-secondary" onclick="window.close()">
+        ✕ Cerrar
+      </button>
+    </div>
+  </div>
+</body>
+</html>
+  `;
+
+  // Abrir en nueva ventana
+  const printWindow = window.open('', '_blank');
+  if (printWindow) {
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+  } else {
+    alert('Por favor permite ventanas emergentes para ver el documento');
   }
-  
-  // Footer
-  const pageCount = doc.getNumberOfPages();
-  for (let i = 1; i <= pageCount; i++) {
-    doc.setPage(i);
-    doc.setFontSize(10);
-    doc.text(
-      `Generado el ${new Date().toLocaleDateString('es-EC')} - Página ${i} de ${pageCount}`,
-      14,
-      doc.internal.pageSize.height - 10
-    );
-  }
-  
-  doc.save(`DeepBlue_${libro.nombre.replace(/\s+/g, '_')}.pdf`);
 }
 
-export function exportToExcel(libro: Libro, items: Item[], pagos: Pago[]) {
-  const totalItems = items.reduce((sum, item) => sum + item.monto, 0);
-  const totalPagos = pagos.reduce((sum, pago) => sum + pago.monto, 0);
-  
-  // Hoja de Servicios
-  const itemsSheet = XLSX.utils.json_to_sheet(
-    items.map(item => ({
-      Fecha: item.fecha ? new Date(item.fecha).toLocaleDateString('es-EC') : '-',
-      Descripción: item.descripcion,
-      Monto: item.monto,
-    }))
-  );
-  
-  // Agregar totales
-  const itemsData = XLSX.utils.sheet_to_json(itemsSheet, { header: 1 }) as any[];
-  itemsData.push(['', 'TOTAL', totalItems]);
-  const itemsSheetWithTotal = XLSX.utils.aoa_to_sheet(itemsData);
-  
-  // Hoja de Pagos
-  const pagosSheet = XLSX.utils.json_to_sheet(
-    pagos.map(pago => ({
-      Fecha: new Date(pago.fecha_pago).toLocaleDateString('es-EC'),
-      Método: pago.metodo,
-      Nota: pago.nota || '',
-      Monto: pago.monto,
-    }))
-  );
-  
-  const pagosData = XLSX.utils.sheet_to_json(pagosSheet, { header: 1 }) as any[];
-  pagosData.push(['', '', 'TOTAL PAGADO', totalPagos]);
-  pagosData.push(['', '', 'SALDO PENDIENTE', totalItems - totalPagos]);
-  const pagosSheetWithTotal = XLSX.utils.aoa_to_sheet(pagosData);
-  
-  // Crear workbook
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, itemsSheetWithTotal, 'Servicios');
-  XLSX.utils.book_append_sheet(wb, pagosSheetWithTotal, 'Pagos');
-  
-  // Hoja de Resumen
-  const resumenSheet = XLSX.utils.aoa_to_sheet([
-    ['RESUMEN'],
-    [],
-    ['Cliente:', 'Deep Blue'],
-    ['Libro:', libro.nombre],
-    ['Factura:', libro.numero_factura || 'N/A'],
-    ['Estado:', libro.estado.toUpperCase()],
-    [],
-    ['Total Servicios:', totalItems],
-    ['Total Pagado:', totalPagos],
-    ['Saldo Pendiente:', totalItems - totalPagos],
-  ]);
-  XLSX.utils.book_append_sheet(wb, resumenSheet, 'Resumen');
-  
-  XLSX.writeFile(wb, `DeepBlue_${libro.nombre.replace(/\s+/g, '_')}.xlsx`);
-}
+// ==================== GALAKIWI HTML EXPORT ====================
 
-// ==================== GALAKIWI EXPORTS (ACTUALIZADO) ====================
 interface SublibroConItems extends Libro {
   items: Item[];
   totalGenerado: number;
 }
 
-export function exportGalakiwiToPDF(
-  libro: Libro, 
-  sublibros: SublibroConItems[], 
-  pagos: Pago[],
-  guiaEspecifica?: SublibroConItems
-) {
-  const doc = new jsPDF();
-  
-  // Header
-  doc.setFontSize(18);
-  doc.text('Tío Ñaño - Libro de Servicios', 14, 20);
-  
-  doc.setFontSize(12);
-  doc.text(`Cliente: Galakiwi`, 14, 30);
-  doc.text(`Libro: ${libro.nombre}`, 14, 37);
-  if (libro.numero_factura) {
-    doc.text(`Factura: ${libro.numero_factura}`, 14, 44);
-  }
-  
-  // Calcular totales generales
-  const totalGeneral = sublibros.reduce((sum, sub) => sum + sub.totalGenerado, 0);
-  const totalPagado = pagos.reduce((sum, pago) => sum + pago.monto, 0);
-  const saldoGeneral = totalGeneral - totalPagado;
-  
-  // Si es exportación de una guía específica
-  if (guiaEspecifica) {
-    doc.text(`Guía: ${guiaEspecifica.nombre}`, 14, libro.numero_factura ? 51 : 44);
-    
-    doc.setFontSize(11);
-    doc.text(`Total Guía: $${guiaEspecifica.totalGenerado.toFixed(2)}`, 140, 30);
-    
-    // Tabla de Items
-    if (guiaEspecifica.items.length > 0) {
-      doc.setFontSize(14);
-      doc.text('Servicios', 14, 65);
-      
-      autoTable(doc, {
-        startY: 70,
-        head: [['Fecha', 'Descripción', 'Monto Base', '+10%', 'Monto Final']],
-        body: guiaEspecifica.items.map(item => [
-          item.fecha ? new Date(item.fecha).toLocaleDateString('es-EC') : '-',
-          item.descripcion,
-          `$${item.monto.toFixed(2)}`,
-          item.aplica_10 ? 'Sí' : 'No',
-          `$${item.monto_final.toFixed(2)}`,
-        ]),
-        theme: 'striped',
-        headStyles: { fillColor: [51, 51, 51] },
-      });
-    }
-  } else {
-    // Exportación COMPLETA con pagos generales
-    doc.setFontSize(11);
-    doc.text(`Total General: $${totalGeneral.toFixed(2)}`, 14, libro.numero_factura ? 55 : 48);
-    doc.text(`Total Pagado: $${totalPagado.toFixed(2)}`, 14, libro.numero_factura ? 62 : 55);
-    doc.setTextColor(saldoGeneral > 0 ? 200 : 0, saldoGeneral > 0 ? 0 : 150, 0);
-    doc.text(`Saldo Pendiente: $${saldoGeneral.toFixed(2)}`, 14, libro.numero_factura ? 69 : 62);
-    doc.setTextColor(0, 0, 0);
-    doc.text(`Guías: ${sublibros.length}`, 14, libro.numero_factura ? 76 : 69);
-    
-    let startY = libro.numero_factura ? 85 : 78;
-    
-    // Tabla de Guías
-    if (sublibros.length > 0) {
-      doc.setFontSize(14);
-      doc.text('Resumen por Guía', 14, startY);
-      
-      autoTable(doc, {
-        startY: startY + 5,
-        head: [['Guía', 'Servicios', 'Total Generado']],
-        body: sublibros.map(sub => [
-          sub.nombre,
-          sub.items.length.toString(),
-          `$${sub.totalGenerado.toFixed(2)}`,
-        ]),
-        theme: 'striped',
-        headStyles: { fillColor: [102, 51, 153] },
-      });
-      
-      startY = (doc as any).lastAutoTable.finalY + 15;
-    }
-    
-    // Tabla de Pagos Generales
-    if (pagos.length > 0) {
-      if (startY > 200) {
-        doc.addPage();
-        startY = 20;
-      }
-      
-      doc.setFontSize(14);
-      doc.text('Pagos Registrados', 14, startY);
-      
-      autoTable(doc, {
-        startY: startY + 5,
-        head: [['Fecha', 'Método', 'Nota', 'Monto']],
-        body: pagos.map(pago => [
-          new Date(pago.fecha_pago).toLocaleDateString('es-EC'),
-          pago.metodo,
-          pago.nota || '-',
-          `$${pago.monto.toFixed(2)}`,
-        ]),
-        theme: 'striped',
-        headStyles: { fillColor: [0, 128, 0] },
-      });
-    }
-  }
-  
-  // Footer
-  const pageCount = doc.getNumberOfPages();
-  for (let i = 1; i <= pageCount; i++) {
-    doc.setPage(i);
-    doc.setFontSize(10);
-    doc.text(
-      `Generado el ${new Date().toLocaleDateString('es-EC')} - Página ${i} de ${pageCount}`,
-      14,
-      doc.internal.pageSize.height - 10
-    );
-  }
-  
-  const fileName = guiaEspecifica 
-    ? `Galakiwi_${libro.nombre}_${guiaEspecifica.nombre}.pdf`
-    : `Galakiwi_${libro.nombre}_Completo.pdf`;
-  doc.save(fileName.replace(/\s+/g, '_'));
-}
-
-export function exportGalakiwiToExcel(
+export function exportGalakiwiToHTML(
   libro: Libro, 
   sublibros: SublibroConItems[], 
   pagos: Pago[]
 ) {
-  const wb = XLSX.utils.book_new();
-  
   const totalGeneral = sublibros.reduce((sum, sub) => sum + sub.totalGenerado, 0);
   const totalPagado = pagos.reduce((sum, pago) => sum + pago.monto, 0);
+  const saldoPendiente = totalGeneral - totalPagado;
   
-  // Hoja de Guías (servicios detallados)
-  sublibros.forEach(sublibro => {
-    const sheetData: any[] = [
-      [`GUÍA: ${sublibro.nombre}`],
-      [],
-      ['Servicios'],
-      ['Fecha', 'Descripción', 'Monto Base', 'Aplica 10%', 'Monto Final'],
-      ...sublibro.items.map(item => [
-        item.fecha ? new Date(item.fecha).toLocaleDateString('es-EC') : '-',
-        item.descripcion,
-        item.monto,
-        item.aplica_10 ? 'Sí' : 'No',
-        item.monto_final,
-      ]),
-      [],
-      ['', '', '', 'TOTAL GUÍA:', sublibro.totalGenerado],
-    ];
-    
-    const sheet = XLSX.utils.aoa_to_sheet(sheetData);
-    XLSX.utils.book_append_sheet(wb, sheet, sublibro.nombre.substring(0, 31));
+  const fechaExportacion = new Date().toLocaleString('es-EC', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
   });
-  
-  // Hoja de Pagos Generales
-  if (pagos.length > 0) {
-    const pagosData = [
-      ['PAGOS GENERALES DEL LIBRO'],
-      [],
-      ['Fecha', 'Método', 'Nota', 'Monto'],
-      ...pagos.map(pago => [
-        new Date(pago.fecha_pago).toLocaleDateString('es-EC'),
-        pago.metodo,
-        pago.nota || '',
-        pago.monto,
-      ]),
-      [],
-      ['', '', 'TOTAL PAGADO:', totalPagado],
-    ];
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('es-EC', { 
+      style: 'currency', 
+      currency: 'USD' 
+    }).format(amount);
+  };
+
+  const formatDate = (dateString: string | null) => {
+    if (!dateString) return '-';
+    return new Date(dateString).toLocaleDateString('es-EC', { 
+      day: '2-digit', 
+      month: '2-digit', 
+      year: 'numeric' 
+    });
+  };
+
+  // Calcular porcentaje de cada guía
+  const guiasConPorcentaje = sublibros.map(sub => ({
+    ...sub,
+    porcentaje: totalGeneral > 0 ? ((sub.totalGenerado / totalGeneral) * 100).toFixed(1) : '0'
+  }));
+
+  const htmlContent = `
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GalaKiwi - ${libro.nombre}</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
     
-    const pagosSheet = XLSX.utils.aoa_to_sheet(pagosData);
-    XLSX.utils.book_append_sheet(wb, pagosSheet, 'Pagos');
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #f5f5f5;
+      padding: 20px;
+      line-height: 1.6;
+    }
+    
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      background: white;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    
+    /* Header */
+    .header {
+      background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+      color: white;
+      padding: 30px;
+      text-align: center;
+    }
+    
+    .header h1 {
+      font-size: 2.5rem;
+      font-weight: 700;
+      margin-bottom: 5px;
+      letter-spacing: 1px;
+    }
+    
+    .header p {
+      font-size: 1.1rem;
+      opacity: 0.9;
+    }
+    
+    /* Info Section */
+    .info-section {
+      background: #f8fafc;
+      padding: 20px 30px;
+      border-bottom: 3px solid #6366f1;
+    }
+    
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+    }
+    
+    .info-item {
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .info-label {
+      font-size: 0.85rem;
+      color: #64748b;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    
+    .info-value {
+      font-size: 1.1rem;
+      color: #1e293b;
+      font-weight: 600;
+      margin-top: 3px;
+    }
+    
+    /* Resumen General */
+    .resumen-section {
+      padding: 25px 30px;
+      background: white;
+    }
+    
+    .section-title {
+      font-size: 1.1rem;
+      color: #6366f1;
+      font-weight: 700;
+      margin-bottom: 15px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    
+    .resumen-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 15px;
+    }
+    
+    .resumen-card {
+      background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+      border-radius: 10px;
+      padding: 20px;
+      text-align: center;
+      border: 2px solid #e2e8f0;
+      transition: transform 0.2s;
+    }
+    
+    .resumen-card:hover {
+      transform: translateY(-2px);
+    }
+    
+    .resumen-card.pagado {
+      background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
+      border-color: #22c55e;
+    }
+    
+    .resumen-card.pendiente {
+      background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+      border-color: #f59e0b;
+    }
+    
+    .resumen-card.total {
+      background: linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%);
+      border-color: #6366f1;
+    }
+    
+    .resumen-label {
+      font-size: 0.8rem;
+      color: #64748b;
+      font-weight: 600;
+      text-transform: uppercase;
+      margin-bottom: 5px;
+    }
+    
+    .resumen-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #1e293b;
+    }
+    
+    .resumen-card.pagado .resumen-value {
+      color: #16a34a;
+    }
+    
+    .resumen-card.pendiente .resumen-value {
+      color: #d97706;
+    }
+    
+    .resumen-card.total .resumen-value {
+      color: #4f46e5;
+    }
+    
+    /* Tables */
+    .table-section {
+      padding: 25px 30px;
+      border-top: 1px solid #e2e8f0;
+    }
+    
+    .table-container {
+      overflow-x: auto;
+      border-radius: 8px;
+      border: 1px solid #e2e8f0;
+    }
+    
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+    }
+    
+    thead {
+      background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+      color: white;
+    }
+    
+    th {
+      padding: 12px 15px;
+      text-align: left;
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 0.8rem;
+      letter-spacing: 0.5px;
+    }
+    
+    td {
+      padding: 12px 15px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    
+    tbody tr:hover {
+      background: #f8fafc;
+    }
+    
+    tbody tr:last-child td {
+      border-bottom: none;
+    }
+    
+    .text-right {
+      text-align: right;
+    }
+    
+    .text-center {
+      text-align: center;
+    }
+    
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    
+    .badge-success {
+      background: #dcfce7;
+      color: #16a34a;
+    }
+    
+    .badge-warning {
+      background: #fef3c7;
+      color: #d97706;
+    }
+    
+    .badge-info {
+      background: #e0e7ff;
+      color: #4f46e5;
+    }
+    
+    /* Footer */
+    .footer {
+      background: #1e293b;
+      color: white;
+      padding: 20px 30px;
+      text-align: center;
+      font-size: 0.9rem;
+    }
+    
+    /* Print styles */
+    @media print {
+      body {
+        background: white;
+        padding: 0;
+      }
+      
+      .container {
+        box-shadow: none;
+        max-width: 100%;
+      }
+      
+      .no-print {
+        display: none;
+      }
+    }
+    
+    /* Action buttons */
+    .actions {
+      padding: 20px 30px;
+      background: #f8fafc;
+      border-top: 1px solid #e2e8f0;
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+    }
+    
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s;
+    }
+    
+    .btn-primary {
+      background: #6366f1;
+      color: white;
+    }
+    
+    .btn-primary:hover {
+      background: #4f46e5;
+    }
+    
+    .btn-secondary {
+      background: white;
+      color: #6366f1;
+      border: 2px solid #6366f1;
+    }
+    
+    .btn-secondary:hover {
+      background: #f8fafc;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <h1>GalaKiwi</h1>
+      <p>Sistema de Cobros y Pagos</p>
+    </div>
+    
+    <!-- Info -->
+    <div class="info-section">
+      <div class="info-grid">
+        <div class="info-item">
+          <span class="info-label">Número de Factura</span>
+          <span class="info-value">${libro.numero_factura || 'N/A'}</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">Libro</span>
+          <span class="info-value">${libro.nombre}</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">Fecha de Exportación</span>
+          <span class="info-value">${fechaExportacion}</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">Total de Guías</span>
+          <span class="info-value">${sublibros.length}</span>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Resumen General -->
+    <div class="resumen-section">
+      <h2 class="section-title">📊 Resumen General</h2>
+      <div class="resumen-cards">
+        <div class="resumen-card total">
+          <div class="resumen-label">Total Generado</div>
+          <div class="resumen-value">${formatCurrency(totalGeneral)}</div>
+        </div>
+        <div class="resumen-card pagado">
+          <div class="resumen-label">Total Pagado</div>
+          <div class="resumen-value">${formatCurrency(totalPagado)}</div>
+        </div>
+        <div class="resumen-card pendiente">
+          <div class="resumen-label">Saldo Pendiente</div>
+          <div class="resumen-value">${formatCurrency(saldoPendiente)}</div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Guías -->
+    <div class="table-section">
+      <h2 class="section-title">👥 Guías</h2>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Guía</th>
+              <th class="text-center">Servicios</th>
+              <th class="text-right">Total Generado</th>
+              <th class="text-right">% del Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${guiasConPorcentaje.map(sub => `
+              <tr>
+                <td><strong>${sub.nombre}</strong></td>
+                <td class="text-center">${sub.items.length}</td>
+                <td class="text-right">${formatCurrency(sub.totalGenerado)}</td>
+                <td class="text-right">
+                  <span class="badge badge-info">${sub.porcentaje}%</span>
+                </td>
+              </tr>
+            `).join('')}
+            <tr style="background: #f1f5f9; font-weight: 600;">
+              <td>TOTAL</td>
+              <td class="text-center">${sublibros.reduce((sum, s) => sum + s.items.length, 0)}</td>
+              <td class="text-right">${formatCurrency(totalGeneral)}</td>
+              <td class="text-right">100%</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    
+    <!-- Detalle de Servicios -->
+    <div class="table-section">
+      <h2 class="section-title">📝 Detalle de Servicios</h2>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Guía</th>
+              <th>Servicio</th>
+              <th class="text-right">Valor Base</th>
+              <th class="text-center">+10%</th>
+              <th class="text-right">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${sublibros.flatMap(sub => 
+              sub.items.map(item => `
+                <tr>
+                  <td>${formatDate(item.fecha)}</td>
+                  <td>${sub.nombre}</td>
+                  <td>${item.descripcion}</td>
+                  <td class="text-right">${formatCurrency(item.monto)}</td>
+                  <td class="text-center">
+                    ${item.aplica_10 ? '<span class="badge badge-success">Sí</span>' : '<span class="badge badge-warning">No</span>'}
+                  </td>
+                  <td class="text-right"><strong>${formatCurrency(item.monto_final)}</strong></td>
+                </tr>
+              `)
+            ).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    
+    <!-- Pagos -->
+    ${pagos.length > 0 ? `
+    <div class="table-section">
+      <h2 class="section-title">💳 Pagos Recibidos</h2>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Método</th>
+              <th>Nota</th>
+              <th class="text-right">Monto</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${pagos.map(pago => `
+              <tr>
+                <td>${formatDate(pago.fecha_pago)}</td>
+                <td>
+                  <span class="badge ${pago.metodo === 'efectivo' ? 'badge-warning' : pago.metodo === 'transferencia' ? 'badge-success' : 'badge-info'}">
+                    ${pago.metodo}
+                  </span>
+                </td>
+                <td>${pago.nota || '-'}</td>
+                <td class="text-right" style="color: #16a34a; font-weight: 600;">
+                  ${formatCurrency(pago.monto)}
+                </td>
+              </tr>
+            `).join('')}
+            <tr style="background: #f0fdf4; font-weight: 700;">
+              <td colspan="3" style="text-align: right;">TOTAL PAGADO:</td>
+              <td class="text-right" style="color: #16a34a; font-size: 1.1rem;">
+                ${formatCurrency(totalPagado)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    ` : ''}
+    
+    <!-- Footer -->
+    <div class="footer">
+      <p>Generado por Tío Ñaño - Sistema de Gestión de Libros</p>
+      <p style="margin-top: 5px; opacity: 0.8; font-size: 0.8rem;">
+        ${new Date().getFullYear()} - Todos los derechos reservados
+      </p>
+    </div>
+    
+    <!-- Actions -->
+    <div class="actions no-print">
+      <button class="btn btn-primary" onclick="window.print()">
+        🖨️ Imprimir / Guardar PDF
+      </button>
+      <button class="btn btn-secondary" onclick="window.close()">
+        ✕ Cerrar
+      </button>
+    </div>
+  </div>
+</body>
+</html>
+  `;
+
+  // Abrir en nueva ventana
+  const printWindow = window.open('', '_blank');
+  if (printWindow) {
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+  } else {
+    alert('Por favor permite ventanas emergentes para ver el documento');
   }
-  
-  // Hoja de Resumen General
-  const resumenData = [
-    ['RESUMEN GENERAL - GALAKIWI'],
-    [],
-    ['Cliente:', 'Galakiwi'],
-    ['Libro:', libro.nombre],
-    ['Factura:', libro.numero_factura || 'N/A'],
-    ['Fecha:', new Date().toLocaleDateString('es-EC')],
-    [],
-    ['Guía', 'Total Generado'],
-    ...sublibros.map(sub => [sub.nombre, sub.totalGenerado]),
-    [],
-    ['TOTAL GENERADO', totalGeneral],
-    ['TOTAL PAGADO', totalPagado],
-    ['SALDO PENDIENTE', totalGeneral - totalPagado],
-  ];
-  
-  const resumenSheet = XLSX.utils.aoa_to_sheet(resumenData);
-  XLSX.utils.book_append_sheet(wb, resumenSheet, 'Resumen General');
-  
-  XLSX.writeFile(wb, `Galakiwi_${libro.nombre.replace(/\s+/g, '_')}.xlsx`);
 }
