@@ -76,7 +76,7 @@ export function GestionPage() {
               </div>
               <div>
                 <h1 className="text-xl font-bold text-slate-900">Sistema de Gestión</h1>
-                <p className="text-sm text-slate-500">Tío Ñaño - Libros de Servicios</p>
+                <p className="text-sm text-slate-500">Manuel Roldán - Libros de Servicios</p>
               </div>
             </div>
             <Button

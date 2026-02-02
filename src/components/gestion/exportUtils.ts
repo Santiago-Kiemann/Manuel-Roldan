@@ -399,7 +399,7 @@ export function exportDeepBlueToHTML(libro: Libro, items: Item[], pagos: Pago[])
     `}
     
     <div class="footer">
-      <p>Generado por Tío Ñaño - Sistema de Gestión de Libros</p>
+      <p>Sistema de Gestión de Libros - Manuel Roldán</p>
       <p style="margin-top: 5px; opacity: 0.8; font-size: 0.8rem;">
         ${new Date().getFullYear()} - Todos los derechos reservados
       </p>
@@ -839,7 +839,7 @@ export function exportGalakiwiToHTML(
     ` : ''}
     
     <div class="footer">
-      <p>Generado por Tío Ñaño - Sistema de Gestión de Libros</p>
+      <p>Sistema de Gestión de Libros - Manuel Roldán - </p>
       <p style="margin-top: 5px; opacity: 0.8; font-size: 0.8rem;">
         ${new Date().getFullYear()} - Todos los derechos reservados
       </p>
