@@ -10,7 +10,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Plus, Trash2, DollarSign, Calendar, Check, FileDown, CreditCard } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { exportToPDF, exportToExcel } from './exportUtils';
+import { exportDeepBlueToHTML, exportDeepBlueToExcel } from './exportUtils';
 import type { Libro, Item, Pago } from '@/types/gestion';
 
 interface LibroDeepBlueProps {
@@ -100,7 +100,6 @@ export function LibroDeepBlue({ libro, onLibroUpdated }: LibroDeepBlueProps) {
 
       if (error) throw error;
 
-      // Si el pago cubre todo el saldo, marcar como pagado
       if (montoPago >= saldoPendiente) {
         await supabase.from('libros').update({ estado: 'pagado' }).eq('id', libro.id);
       }
@@ -149,7 +148,6 @@ export function LibroDeepBlue({ libro, onLibroUpdated }: LibroDeepBlueProps) {
     }
 
     try {
-      // Registrar el pago final
       if (montoCierre > 0) {
         await supabase.from('pagos').insert({
           libro_id: libro.id,
@@ -162,7 +160,6 @@ export function LibroDeepBlue({ libro, onLibroUpdated }: LibroDeepBlueProps) {
       const nuevoSaldo = saldoPendiente - montoCierre;
 
       if (nuevoSaldo > 0) {
-        // Crear nuevo libro con saldo pendiente
         const { data: newLibro } = await supabase
           .from('libros')
           .insert({
@@ -318,11 +315,20 @@ export function LibroDeepBlue({ libro, onLibroUpdated }: LibroDeepBlueProps) {
             <CardHeader className="pb-3 flex flex-row items-center justify-between">
               <CardTitle className="text-sm font-medium text-slate-700">Lista de Servicios</CardTitle>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => exportToPDF(libro, items, pagos)}>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => exportDeepBlueToHTML(libro, items, pagos)}
+                  className="bg-blue-900 text-white hover:bg-blue-800"
+                >
                   <FileDown className="h-4 w-4 mr-1" />
-                  PDF
+                  Ver / Imprimir
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => exportToExcel(libro, items, pagos)}>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => exportDeepBlueToExcel(libro, items, pagos)}
+                >
                   <FileDown className="h-4 w-4 mr-1" />
                   Excel
                 </Button>
