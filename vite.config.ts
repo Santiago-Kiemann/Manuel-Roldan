@@ -4,7 +4,7 @@ import path from 'path'
 
 export default defineConfig({
   plugins: [react()],
-  base: '/Manuel-Roldan/', // ← IMPORTANTE: nombre de tu repo
+  base: '/', // ← Vercel maneja esto automáticamente
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
